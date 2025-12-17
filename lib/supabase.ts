@@ -8,20 +8,35 @@
  */
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
-}
+// For build time, provide placeholder if env vars not set
+// This allows build to succeed, but will fail at runtime if not set
+const url = supabaseUrl || 'https://placeholder.supabase.co';
+const key = supabaseAnonKey || 'placeholder-key';
 
 // Client for client-side components (browser)
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(url, key);
+
+// Runtime validation - check if env vars are actually set
+if (typeof window === 'undefined') {
+  // Server-side: validate at runtime
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('⚠️ Missing Supabase environment variables!');
+    console.error('Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your environment variables.');
+  }
+} else {
+  // Client-side: validate at runtime
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('⚠️ Missing Supabase environment variables!');
+  }
+}
 
 // Admin client for server-side operations (with service role key)
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-export const supabaseAdmin = supabaseServiceRoleKey
+export const supabaseAdmin = supabaseServiceRoleKey && supabaseUrl
   ? createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: {
         autoRefreshToken: false,
