@@ -8,6 +8,13 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import {
+  sanitizeString,
+  validateQuantity,
+  validateUUID,
+  validateTableNumber,
+  validateDescription,
+} from '@/lib/validation';
 
 // POST /api/orders - Create new order
 export async function POST(request: NextRequest) {
@@ -23,25 +30,99 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate total price
+    // Limit maximum items per order (prevent abuse)
+    if (items.length > 50) {
+      return NextResponse.json(
+        { success: false, error: 'Maximum 50 items per order' },
+        { status: 400 }
+      );
+    }
+
+    // Validate and fetch menu items from database to prevent price manipulation
+    const menuItemIds = items.map((item: any) => item.menu_item_id);
+    const { data: menuItems, error: menuError } = await supabase
+      .from('menu_items')
+      .select('id, price, is_available, name')
+      .in('id', menuItemIds);
+
+    if (menuError) throw menuError;
+    if (!menuItems || menuItems.length !== menuItemIds.length) {
+      return NextResponse.json(
+        { success: false, error: 'One or more menu items not found' },
+        { status: 400 }
+      );
+    }
+
+    // Create a map for quick lookup
+    const menuItemMap = new Map(menuItems.map(item => [item.id, item]));
+
+    // Validate all items and calculate total price using server-side prices
     let totalPrice = 0;
+    const validatedItems: Array<{
+      menu_item_id: string;
+      quantity: number;
+      price: number;
+    }> = [];
+
     for (const item of items) {
-      if (!item.menu_item_id || !item.quantity || !item.price) {
+      // Validate menu_item_id
+      const menuItemId = validateUUID(item.menu_item_id);
+      if (!menuItemId) {
         return NextResponse.json(
-          { success: false, error: 'Invalid item data' },
+          { success: false, error: 'Invalid menu item ID' },
           { status: 400 }
         );
       }
-      totalPrice += item.price * item.quantity;
+
+      // Get menu item from database
+      const menuItem = menuItemMap.get(menuItemId);
+      if (!menuItem) {
+        return NextResponse.json(
+          { success: false, error: `Menu item ${menuItemId} not found` },
+          { status: 400 }
+        );
+      }
+
+      // Check if item is available
+      if (!menuItem.is_available) {
+        return NextResponse.json(
+          { success: false, error: `Item "${menuItem.name}" is not available` },
+          { status: 400 }
+        );
+      }
+
+      // Validate quantity (ignore price from client - use server price)
+      const quantity = validateQuantity(item.quantity);
+      if (!quantity) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid quantity. Must be 1-1000' },
+          { status: 400 }
+        );
+      }
+
+      // Use price from database, NOT from client (prevents price manipulation)
+      const itemPrice = menuItem.price;
+      totalPrice += itemPrice * quantity;
+
+      validatedItems.push({
+        menu_item_id: menuItemId,
+        quantity,
+        price: itemPrice, // Always use server-side price
+      });
     }
+
+    // Sanitize and validate optional fields
+    const sanitizedCustomerName = sanitizeString(customer_name, 100);
+    const sanitizedTableNumber = validateTableNumber(table_number);
+    const sanitizedOrderNotes = validateDescription(order_notes);
 
     // Create order
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
-        customer_name: customer_name || null,
-        table_number: table_number || null,
-        order_notes: order_notes || null,
+        customer_name: sanitizedCustomerName,
+        table_number: sanitizedTableNumber,
+        order_notes: sanitizedOrderNotes,
         status: 'pending',
         total_price: totalPrice,
       })
@@ -50,12 +131,12 @@ export async function POST(request: NextRequest) {
 
     if (orderError) throw orderError;
 
-    // Create order items
-    const orderItems = items.map((item: any) => ({
+    // Create order items with validated data
+    const orderItems = validatedItems.map((item) => ({
       order_id: order.id,
       menu_item_id: item.menu_item_id,
       quantity: item.quantity,
-      price_at_order_time: item.price,
+      price_at_order_time: item.price, // Server-side validated price
     }));
 
     const { error: itemsError } = await supabase
@@ -135,9 +216,17 @@ export async function GET(request: NextRequest) {
       `)
       .order('created_at', { ascending: false });
 
-    // Filter by status if provided
+    // Validate and filter by status if provided
     if (status) {
-      query = query.eq('status', status);
+      const validStatuses = ['pending', 'accepted', 'preparing', 'ready', 'completed', 'rejected'];
+      if (validStatuses.includes(status)) {
+        query = query.eq('status', status);
+      } else {
+        return NextResponse.json(
+          { success: false, error: 'Invalid status filter' },
+          { status: 400 }
+        );
+      }
     }
 
     const { data: orders, error } = await query;

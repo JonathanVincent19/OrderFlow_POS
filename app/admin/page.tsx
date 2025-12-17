@@ -24,6 +24,7 @@ import {
   Loader2,
   Search
 } from 'lucide-react';
+import { getAdminAuthHeader } from '@/lib/adminAuth';
 
 interface MenuCategory {
   id: string;
@@ -108,9 +109,14 @@ export default function AdminPage() {
 
   const handleToggleAvailability = async (itemId: string, currentStatus: boolean) => {
     try {
+      const headers = await getAdminAuthHeader();
+      if (!headers) {
+        setError('Admin password required');
+        return;
+      }
       const res = await fetch(`/api/admin/menu-items/${itemId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ is_available: !currentStatus }),
       });
 
@@ -128,9 +134,14 @@ export default function AdminPage() {
 
   const handleToggleCategoryStatus = async (categoryId: string, currentStatus: boolean) => {
     try {
+      const headers = await getAdminAuthHeader();
+      if (!headers) {
+        setError('Admin password required');
+        return;
+      }
       const res = await fetch(`/api/admin/categories/${categoryId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ is_active: !currentStatus }),
       });
 
@@ -150,8 +161,14 @@ export default function AdminPage() {
     if (!confirm(`Are you sure you want to delete "${itemName}"?`)) return;
 
     try {
+      const headers = await getAdminAuthHeader();
+      if (!headers) {
+        setError('Admin password required');
+        return;
+      }
       const res = await fetch(`/api/admin/menu-items/${itemId}`, {
         method: 'DELETE',
+        headers,
       });
 
       const data = await res.json();
@@ -170,8 +187,14 @@ export default function AdminPage() {
     if (!confirm(`Are you sure you want to delete "${categoryName}"? This will remove all items in this category.`)) return;
 
     try {
+      const headers = await getAdminAuthHeader();
+      if (!headers) {
+        setError('Admin password required');
+        return;
+      }
       const res = await fetch(`/api/admin/categories/${categoryId}`, {
         method: 'DELETE',
+        headers,
       });
 
       const data = await res.json();
@@ -244,10 +267,15 @@ export default function AdminPage() {
         : '/api/admin/menu-items';
 
       const method = editingItem ? 'PATCH' : 'POST';
+      const headers = await getAdminAuthHeader();
+      if (!headers) {
+        setError('Admin password required');
+        return;
+      }
 
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           name: menuFormData.name,
           description: menuFormData.description || null,
@@ -282,10 +310,15 @@ export default function AdminPage() {
         : '/api/admin/categories';
 
       const method = editingCategory ? 'PATCH' : 'POST';
+      const headers = await getAdminAuthHeader();
+      if (!headers) {
+        setError('Admin password required');
+        return;
+      }
 
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           name: categoryFormData.name,
           description: categoryFormData.description || null,

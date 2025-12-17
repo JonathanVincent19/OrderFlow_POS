@@ -192,8 +192,8 @@ export default function Home() {
             </div>
             <div>
               <div className="text-center"> 
-                <h1 className="text-3xl font-bold leading-tight font-[family-name:var(--font-bebas)] tracking-wider">LESTARI KOPI</h1>
-                <p className="text-xs leading-tight text-emerald-100 font-[family-name:var(--font-inter)]">Ponorogo</p>
+                <h1 className="text-3xl font-bold leading-tight font-[family-name:var(--font-bebas)] tracking-wider">YOUR BRAND</h1>
+                <p className="text-xs leading-tight text-emerald-100 font-[family-name:var(--font-inter)]">YOUR BRAND LOCATION</p>
               </div>
             </div>
           </div>

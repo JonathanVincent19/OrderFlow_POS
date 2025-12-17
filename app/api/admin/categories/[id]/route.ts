@@ -7,22 +7,77 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { verifyAdminAuth, createUnauthorizedResponse } from '@/lib/auth';
+import { validateUUID, validateName, validateDescription, validateSortOrder } from '@/lib/validation';
 
 // PATCH /api/admin/categories/[id] - Update category
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  // Check admin authorization
+  if (!verifyAdminAuth(request)) {
+    return createUnauthorizedResponse();
+  }
+
   try {
-    const categoryId = params.id;
+    // Validate category ID
+    const categoryId = validateUUID(params.id);
+    if (!categoryId) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid category ID' },
+        { status: 400 }
+      );
+    }
+
+    // Check if category exists
+    const { data: existingCategory, error: checkError } = await supabase
+      .from('menu_categories')
+      .select('id')
+      .eq('id', categoryId)
+      .single();
+
+    if (checkError || !existingCategory) {
+      return NextResponse.json(
+        { success: false, error: 'Category not found' },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
     const { name, description, is_active, sort_order } = body;
 
     const updateData: any = {};
-    if (name !== undefined) updateData.name = name;
-    if (description !== undefined) updateData.description = description || null;
-    if (is_active !== undefined) updateData.is_active = is_active;
-    if (sort_order !== undefined) updateData.sort_order = sort_order;
+    
+    // Validate and sanitize each field if provided
+    if (name !== undefined) {
+      const validatedName = validateName(name);
+      if (!validatedName) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid name (1-200 characters required)' },
+          { status: 400 }
+        );
+      }
+      updateData.name = validatedName;
+    }
+    
+    if (description !== undefined) {
+      updateData.description = validateDescription(description);
+    }
+    
+    if (is_active !== undefined) {
+      if (typeof is_active !== 'boolean') {
+        return NextResponse.json(
+          { success: false, error: 'is_active must be a boolean' },
+          { status: 400 }
+        );
+      }
+      updateData.is_active = is_active;
+    }
+    
+    if (sort_order !== undefined) {
+      updateData.sort_order = validateSortOrder(sort_order);
+    }
 
     const { data: category, error } = await supabase
       .from('menu_categories')
@@ -54,8 +109,34 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  // Check admin authorization
+  if (!verifyAdminAuth(request)) {
+    return createUnauthorizedResponse();
+  }
+
   try {
-    const categoryId = params.id;
+    // Validate category ID
+    const categoryId = validateUUID(params.id);
+    if (!categoryId) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid category ID' },
+        { status: 400 }
+      );
+    }
+
+    // Check if category exists
+    const { data: existingCategory, error: checkError } = await supabase
+      .from('menu_categories')
+      .select('id')
+      .eq('id', categoryId)
+      .single();
+
+    if (checkError || !existingCategory) {
+      return NextResponse.json(
+        { success: false, error: 'Category not found' },
+        { status: 404 }
+      );
+    }
 
     const { error } = await supabase
       .from('menu_categories')

@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import {
+  validateUUID,
+  validateOrderStatus,
+  sanitizeString,
+  validateTableNumber,
+} from '@/lib/validation';
 
 // PATCH /api/orders/[id] - Update order (accept, reject, update status)
 export async function PATCH(
@@ -7,36 +13,60 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const orderId = params.id;
-    const body = await request.json();
-    const { status, customer_name, table_number } = body;
-
-    if (!status) {
+    // Validate order ID
+    const orderId = validateUUID(params.id);
+    if (!orderId) {
       return NextResponse.json(
-        { success: false, error: 'Status is required' },
+        { success: false, error: 'Invalid order ID' },
         { status: 400 }
       );
     }
 
+    const body = await request.json();
+    const { status, customer_name, table_number } = body;
+
+    // Validate status
+    const validStatus = validateOrderStatus(status);
+    if (!validStatus) {
+      return NextResponse.json(
+        { success: false, error: 'Valid status is required (pending, accepted, preparing, ready, completed, rejected)' },
+        { status: 400 }
+      );
+    }
+
+    // Check if order exists
+    const { data: existingOrder, error: checkError } = await supabase
+      .from('orders')
+      .select('id, status')
+      .eq('id', orderId)
+      .single();
+
+    if (checkError || !existingOrder) {
+      return NextResponse.json(
+        { success: false, error: 'Order not found' },
+        { status: 404 }
+      );
+    }
+
     const updateData: any = {
-      status,
+      status: validStatus,
     };
 
     // If accepting order, add customer name and table number
-    if (status === 'accepted') {
-      if (customer_name) updateData.customer_name = customer_name;
-      if (table_number) updateData.table_number = table_number;
+    if (validStatus === 'accepted') {
+      const sanitizedCustomerName = sanitizeString(customer_name, 100);
+      const sanitizedTableNumber = validateTableNumber(table_number);
+      
+      if (sanitizedCustomerName) updateData.customer_name = sanitizedCustomerName;
+      if (sanitizedTableNumber) updateData.table_number = sanitizedTableNumber;
       updateData.accepted_at = new Date().toISOString();
+      // If accepting, automatically set to preparing for kitchen
+      updateData.status = 'preparing';
     }
 
     // If completing order
-    if (status === 'completed') {
+    if (validStatus === 'completed') {
       updateData.completed_at = new Date().toISOString();
-    }
-
-    // If accepting, automatically set to preparing for kitchen
-    if (status === 'accepted') {
-      updateData.status = 'preparing';
     }
 
     const { data: order, error } = await supabase
@@ -83,7 +113,28 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const orderId = params.id;
+    // Validate order ID
+    const orderId = validateUUID(params.id);
+    if (!orderId) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid order ID' },
+        { status: 400 }
+      );
+    }
+
+    // Check if order exists
+    const { data: existingOrder, error: checkError } = await supabase
+      .from('orders')
+      .select('id, status')
+      .eq('id', orderId)
+      .single();
+
+    if (checkError || !existingOrder) {
+      return NextResponse.json(
+        { success: false, error: 'Order not found' },
+        { status: 404 }
+      );
+    }
 
     // Instead of deleting, mark as rejected
     const { data: order, error } = await supabase

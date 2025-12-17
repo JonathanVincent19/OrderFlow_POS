@@ -7,6 +7,15 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { verifyAdminAuth, createUnauthorizedResponse } from '@/lib/auth';
+import {
+  validateName,
+  validateDescription,
+  validatePrice,
+  validateSortOrder,
+  validateUUIDArray,
+  validateImageUrl,
+} from '@/lib/validation';
 
 // GET /api/admin/menu-items - Get all menu items (including unavailable) with categories
 export async function GET() {
@@ -52,13 +61,46 @@ export async function GET() {
 
 // POST /api/admin/menu-items - Create new menu item with categories
 export async function POST(request: NextRequest) {
+  // Check admin authorization
+  if (!verifyAdminAuth(request)) {
+    return createUnauthorizedResponse();
+  }
+
   try {
     const body = await request.json();
     const { name, description, price, category_ids, image_url, is_available, sort_order } = body;
 
-    if (!name || !price) {
+    // Validate required fields
+    const validatedName = validateName(name);
+    if (!validatedName) {
       return NextResponse.json(
-        { success: false, error: 'Name and price are required' },
+        { success: false, error: 'Valid name is required (1-200 characters)' },
+        { status: 400 }
+      );
+    }
+
+    const validatedPrice = validatePrice(price);
+    if (!validatedPrice) {
+      return NextResponse.json(
+        { success: false, error: 'Valid price is required (must be positive number)' },
+        { status: 400 }
+      );
+    }
+
+    // Validate optional fields
+    const validatedDescription = validateDescription(description);
+    const validatedImageUrl = validateImageUrl(image_url);
+    const validatedSortOrder = validateSortOrder(sort_order);
+    const validatedIsAvailable = typeof is_available === 'boolean' ? is_available : true;
+
+    // Validate category_ids if provided
+    const validatedCategoryIds = category_ids !== undefined
+      ? validateUUIDArray(category_ids, 20) // Max 20 categories per item
+      : null;
+
+    if (category_ids !== undefined && validatedCategoryIds === null) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid category IDs' },
         { status: 400 }
       );
     }
@@ -67,22 +109,37 @@ export async function POST(request: NextRequest) {
     const { data: menuItem, error: itemError } = await supabase
       .from('menu_items')
       .insert({
-        name,
-        description: description || null,
-        price: parseFloat(price),
+        name: validatedName,
+        description: validatedDescription,
+        price: validatedPrice,
         category_id: null, // Keep null for many-to-many
-        image_url: image_url || null,
-        is_available: is_available !== undefined ? is_available : true,
-        sort_order: sort_order || 0,
+        image_url: validatedImageUrl,
+        is_available: validatedIsAvailable,
+        sort_order: validatedSortOrder,
       })
       .select()
       .single();
 
     if (itemError) throw itemError;
 
-    // Add categories via junction table
-    if (category_ids && Array.isArray(category_ids) && category_ids.length > 0) {
-      const categoryAssociations = category_ids.map((catId: string) => ({
+    // Add categories via junction table if provided
+    if (validatedCategoryIds && validatedCategoryIds.length > 0) {
+      // Verify all category IDs exist
+      const { data: existingCategories, error: catCheckError } = await supabase
+        .from('menu_categories')
+        .select('id')
+        .in('id', validatedCategoryIds);
+
+      if (catCheckError || !existingCategories || existingCategories.length !== validatedCategoryIds.length) {
+        // Rollback menu item creation
+        await supabase.from('menu_items').delete().eq('id', menuItem.id);
+        return NextResponse.json(
+          { success: false, error: 'One or more category IDs not found' },
+          { status: 400 }
+        );
+      }
+
+      const categoryAssociations = validatedCategoryIds.map((catId: string) => ({
         menu_item_id: menuItem.id,
         category_id: catId,
       }));
@@ -97,7 +154,7 @@ export async function POST(request: NextRequest) {
     // Return item with category_ids
     const result = {
       ...menuItem,
-      category_ids: category_ids || [],
+      category_ids: validatedCategoryIds || [],
     };
 
     return NextResponse.json({

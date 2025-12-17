@@ -7,6 +7,8 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { verifyAdminAuth, createUnauthorizedResponse } from '@/lib/auth';
+import { validateName, validateDescription, validateSortOrder } from '@/lib/validation';
 
 // GET /api/admin/categories - Get all categories (including inactive)
 export async function GET() {
@@ -36,24 +38,40 @@ export async function GET() {
 
 // POST /api/admin/categories - Create new category
 export async function POST(request: NextRequest) {
+  // Check admin authorization
+  if (!verifyAdminAuth(request)) {
+    return createUnauthorizedResponse();
+  }
+
   try {
     const body = await request.json();
     const { name, description, is_active, sort_order } = body;
 
-    if (!name) {
+    // Validate and sanitize name
+    const validatedName = validateName(name);
+    if (!validatedName) {
       return NextResponse.json(
-        { success: false, error: 'Name is required' },
+        { success: false, error: 'Valid name is required (1-200 characters)' },
         { status: 400 }
       );
     }
 
+    // Validate and sanitize description
+    const validatedDescription = validateDescription(description);
+    
+    // Validate sort_order
+    const validatedSortOrder = validateSortOrder(sort_order);
+
+    // Validate is_active (must be boolean)
+    const validatedIsActive = typeof is_active === 'boolean' ? is_active : true;
+
     const { data: category, error } = await supabase
       .from('menu_categories')
       .insert({
-        name,
-        description: description || null,
-        is_active: is_active !== undefined ? is_active : true,
-        sort_order: sort_order || 0,
+        name: validatedName,
+        description: validatedDescription,
+        is_active: validatedIsActive,
+        sort_order: validatedSortOrder,
       })
       .select()
       .single();
